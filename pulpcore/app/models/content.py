@@ -235,7 +235,17 @@ class Artifact(Model):
         return Artifact(**attributes)
 
 
-class Content(MasterModel, QueryMixin):
+class Content(MasterModel):
+    # The new "content" model, which is not directly inherited
+    _artifacts = models.ManyToManyField(Artifact, through='ContentArtifact')
+
+    class Meta:
+        verbose_name_plural = 'content'
+        unique_together = ()
+
+
+class ContentMixin(models.Model, QueryMixin):
+    # This essentially becomes an abstract mixin that adds a content link to any subclass
     """
     A piece of managed content.
 
@@ -245,13 +255,35 @@ class Content(MasterModel, QueryMixin):
     """
     TYPE = 'content'
 
-    _artifacts = models.ManyToManyField(Artifact, through='ContentArtifact')
-
+    # admittedly, not 100% sure Django would accept this via Mixin. Haven't tried it.
+    # but this is how inheritance works - the primary key of the parent class is re-used
+    # as the primary key of the subclass which simplifies queries dramatically
+    _content = models.OneToOneField(Content, primary_key=True)
     objects = BulkCreateManager()
 
     class Meta:
-        verbose_name_plural = 'content'
-        unique_together = ()
+        abstract = True
+
+    # We add properties so that our serializers work as they did previously
+    @property
+    def _artifacts(self):
+        return self._content._artifacts
+
+    @property
+    def _id(self):
+        return self._content._id
+
+    @property
+    def _created(self):
+        return self._content._created
+
+    @property
+    def _last_updated(self):
+        return self._content._last_updated
+
+    @property
+    def _type(self):
+        return self._content._type
 
     @classmethod
     def natural_key_fields(cls):

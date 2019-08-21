@@ -15,7 +15,7 @@ class Model(models.Model):
 
     References:
 
-        * https://docs.djangoproject.com/en/1.8/topics/db/models/#automatic-primary-key-fields
+        * https://docs.djangoproject.com/en/2.2/topics/db/models/#automatic-primary-key-fields
 
     """
     _id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -37,24 +37,7 @@ class Model(models.Model):
         return str(self)
 
 
-class MasterModelMeta(ModelBase):
-    def __new__(cls, name, bases, attrs, **kwargs):
-        """Override __new__ to set the default_related_name."""
-        if Model not in bases and MasterModel not in bases:  # Only affects "Detail" models.
-            meta = attrs.get("Meta")
-            default_related_name = getattr(
-                meta, "default_related_name", None)
-            abstract = getattr(meta, "abstract", None)
-
-            if not default_related_name and not abstract:
-                raise Exception(_("The 'default_related_name' option has not been set for "
-                                  "{class_name}").format(class_name=name))
-
-        new_class = super().__new__(cls, name, bases, attrs, **kwargs)
-        return new_class
-
-
-class MasterModel(Model, metaclass=MasterModelMeta):
+class MasterModel(Model):
     """Base model for the "Master" model in a "Master-Detail" relationship.
 
     Provides methods for casting down to detail types, back up to the master type,
