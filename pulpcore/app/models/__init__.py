@@ -10,6 +10,7 @@ from .content import (  # noqa
     AsciiArmoredDetachedSigningService,
     Content,
     ContentArtifact,
+    ContentMixin,
     PulpTemporaryFile,
     RemoteArtifact,
     SigningService,

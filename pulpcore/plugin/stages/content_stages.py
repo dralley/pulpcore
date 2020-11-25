@@ -37,18 +37,20 @@ class QueryExistingContents(Stage):
             The coroutine for this stage.
         """
         async for batch in self.batches():
-            content_q_by_type = defaultdict(lambda: Q(pk__in=[]))
-            d_content_by_nat_key = defaultdict(list)
+            content_digests_by_type = defaultdict(list)
+            d_content_by_digest = defaultdict(list)
             for d_content in batch:
                 if d_content.content._state.adding:
                     model_type = type(d_content.content)
-                    unit_q = d_content.content.q()
-                    content_q_by_type[model_type] = content_q_by_type[model_type] | unit_q
-                    d_content_by_nat_key[d_content.content.natural_key()].append(d_content)
+                    content_digest = d_content.content.pulp_digest()
+                    content_digests_by_type[model_type].append(content_digest)
+                    d_content_by_digest[content_digest].append(d_content)
 
-            for model_type in content_q_by_type.keys():
-                for result in model_type.objects.filter(content_q_by_type[model_type]).iterator():
-                    for d_content in d_content_by_nat_key[result.natural_key()]:
+            for model_type, digests in content_digests_by_type.items():
+                query = Q(_pulp_content_digest__in=digests)
+
+                for result in model_type.objects.filter(query).iterator():
+                    for d_content in d_content_by_digest[result.pulp_digest()]:
                         d_content.content = result
 
             for d_content in batch:
@@ -126,7 +128,8 @@ class ContentSaver(Stage):
                 :class:`~pulpcore.plugin.stages.DeclarativeContent` objects to be saved.
 
         """
-        pass
+        for d_content in batch:
+            d_content.content._pulp_content_digest = d_content.content.pulp_digest()
 
     async def _post_save(self, batch):
         """

@@ -412,7 +412,7 @@ class PulpTemporaryFile(HandleTempFilesMixin, BaseModel):
         return PulpTemporaryFile(file=file)
 
 
-class Content(MasterModel, QueryMixin):
+class Content(MasterModel):
     """
     A piece of managed content.
 
@@ -435,31 +435,6 @@ class Content(MasterModel, QueryMixin):
     class Meta:
         verbose_name_plural = "content"
         unique_together = ()
-
-    @classmethod
-    def natural_key_fields(cls):
-        """
-        Returns a tuple of the natural key fields which usually equates to unique_together fields
-        """
-        return tuple(chain.from_iterable(cls._meta.unique_together))
-
-    def natural_key(self):
-        """
-        Get the model's natural key based on natural_key_fields.
-
-        Returns:
-            tuple: The natural key.
-        """
-        return tuple(getattr(self, f) for f in self.natural_key_fields())
-
-    def natural_key_dict(self):
-        """
-        Get the model's natural key as a dictionary of keys and values.
-        """
-        to_return = {}
-        for key in self.natural_key_fields():
-            to_return[key] = getattr(self, key)
-        return to_return
 
     @staticmethod
     def init_from_artifact_and_relative_path(artifact, relative_path):
@@ -486,6 +461,54 @@ class Content(MasterModel, QueryMixin):
             An un-saved instance of :class:`~pulpcore.plugin.models.Content` sub-class.
         """
         raise NotImplementedError()
+
+
+class ContentMixin(Content, QueryMixin):
+
+    _pulp_content_digest = models.TextField(default='', unique=True)
+
+    @classmethod
+    def natural_key_fields(cls):
+        """
+        Returns a tuple of the natural key fields which usually equates to unique_together fields
+        """
+        return tuple(chain.from_iterable(cls._meta.unique_together))
+
+    def natural_key(self):
+        """
+        Get the model's natural key based on natural_key_fields.
+
+        Returns:
+            tuple: The natural key.
+        """
+        return tuple(getattr(self, f) for f in self.natural_key_fields())
+
+    def natural_key_dict(self):
+        """
+        Get the model's natural key as a dictionary of keys and values.
+        """
+        to_return = {}
+        for key in self.natural_key_fields():
+            to_return[key] = getattr(self, key)
+        return to_return
+
+    def pulp_digest(self):
+        """
+        Get a digest of the model's unique natural key.
+        """
+        digest = hashlib.sha256()
+        digest.update(str(self.natural_key()).encode("utf-8"))
+        return digest.hexdigest()
+
+    def pre_save(self):
+        """
+        Set the digest prior to saving.
+        """
+        self._pulp_content_digest = self.pulp_digest()
+        super().pre_save()
+
+    class Meta:
+        abstract = True
 
 
 class ContentArtifact(BaseModel, QueryMixin):

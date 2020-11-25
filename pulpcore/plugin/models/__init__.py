@@ -11,6 +11,7 @@ from pulpcore.app.models import (  # noqa
     BaseModel,
     Content,
     ContentArtifact,
+    ContentMixin,
     ContentGuard,
     CreatedResource,
     Export,
