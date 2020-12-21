@@ -119,7 +119,10 @@ class PulpWorker(Worker):
             pass
         else:
             exc_type, exc, tb = sys.exc_info()
-            task.set_failed(exc, tb)
+            if not job.is_stopped:
+                # stopped jobs go onto the failed queue in RQ, so we need to ignore those
+                # to avoid overwriting the task status
+                task.set_failed(exc, tb)
 
         return super().handle_job_failure(job, **kwargs)
 
