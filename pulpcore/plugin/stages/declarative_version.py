@@ -135,6 +135,8 @@ class DeclarativeVersion:
     def create(self):
         """
         Perform the work. This is the long-blocking call where all syncing occurs.
+
+        Returns: (bool) Whether a new repository version was created.
         """
         with WorkingDirectory():
             with self.repository.new_version() as new_version:
@@ -146,3 +148,5 @@ class DeclarativeVersion:
                 stages.append(EndStage())
                 pipeline = create_pipeline(stages)
                 loop.run_until_complete(pipeline)
+
+        return new_version if new_version.complete else None

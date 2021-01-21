@@ -37,6 +37,11 @@ class RepositorySerializer(ModelSerializer):
         required=False,
         allow_null=True,
     )
+    publish_settings = serializers.JSONField(
+        help_text=_("Settings to use during automatic publishing."),
+        required=False,
+        allow_null=True,
+    )
 
     def validate_remote(self, value):
         if value and type(value) not in self.Meta.model.REMOTE_TYPES:
@@ -55,6 +60,7 @@ class RepositorySerializer(ModelSerializer):
             "name",
             "description",
             "remote",
+            "publish_settings",
         )
 
 
