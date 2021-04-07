@@ -3,6 +3,8 @@ from collections import defaultdict
 from gettext import gettext as _
 import logging
 
+from asgiref.sync import sync_to_async
+
 from django.db.models import Prefetch, prefetch_related_objects
 
 from pulpcore.plugin.exceptions import UnsupportedDigestValidationError
@@ -13,7 +15,7 @@ from .api import Stage
 log = logging.getLogger(__name__)
 
 
-def _check_for_forbidden_checksume_type(artifact):
+def _check_for_forbidden_checksum_type(artifact):
     """Check if content doesn't have forbidden checksum type.
 
     If contains forbidden checksum type it will raise ValueError,
@@ -72,7 +74,7 @@ class QueryExistingArtifacts(Stage):
                 for d_artifact in d_content.d_artifacts:
                     if d_artifact.artifact._state.adding:
                         if not d_artifact.deferred_download:
-                            _check_for_forbidden_checksume_type(d_artifact.artifact)
+                            _check_for_forbidden_checksum_type(d_artifact.artifact)
                         for digest_type in Artifact.COMMON_DIGEST_FIELDS:
                             digest_value = getattr(d_artifact.artifact, digest_type)
                             if digest_value:
@@ -85,7 +87,12 @@ class QueryExistingArtifacts(Stage):
             # swap it out with the existing one.
             for digest_type, digests in artifact_digests_by_type.items():
                 query_params = {"{attr}__in".format(attr=digest_type): digests}
-                existing_artifacts = Artifact.objects.filter(**query_params).only(digest_type)
+
+                @sync_to_async(thread_sensitive=False)
+                def get_existing_artifacts():
+                    return Artifact.objects.filter(**query_params).only(digest_type)
+
+                existing_artifacts = await get_existing_artifacts()
                 for d_content in batch:
                     for d_artifact in d_content.d_artifacts:
                         artifact_digest = getattr(d_artifact.artifact, digest_type)
