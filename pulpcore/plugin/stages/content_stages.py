@@ -103,11 +103,7 @@ class ContentSaver(Stage):
                                 raise e
                             continue
                         for d_artifact in d_content.d_artifacts:
-                            if not d_artifact.artifact._state.adding:
-                                artifact = d_artifact.artifact
-                            else:
-                                # set to None for on-demand synced artifacts
-                                artifact = None
+                            artifact = d_artifact.artifact
                             content_artifact = ContentArtifact(
                                 content=d_content.content,
                                 artifact=artifact,

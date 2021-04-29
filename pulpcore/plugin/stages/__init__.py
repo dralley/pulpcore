@@ -3,7 +3,6 @@ from .artifact_stages import (  # noqa
     ArtifactDownloader,
     ArtifactSaver,
     QueryExistingArtifacts,
-    RemoteArtifactSaver,
 )
 from .association_stages import (  # noqa
     ContentAssociation,

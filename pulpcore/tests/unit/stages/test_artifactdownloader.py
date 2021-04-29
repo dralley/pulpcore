@@ -92,7 +92,7 @@ class TestArtifactDownloader(asynctest.ClockedTestCase):
             artifact.pk = uuid4()
             artifact._state.adding = delay is not None
             artifact.DIGEST_FIELDS = []
-            artifact.file = artifact_path
+            artifact.set_file(artifact_path)
             remote = mock.Mock()
             remote.get_downloader = DownloaderMock
             das.append(

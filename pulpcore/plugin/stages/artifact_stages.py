@@ -3,10 +3,10 @@ from collections import defaultdict
 from gettext import gettext as _
 import logging
 
-from django.db.models import Prefetch, prefetch_related_objects
+from django.db import transaction
 
 from pulpcore.plugin.exceptions import UnsupportedDigestValidationError
-from pulpcore.plugin.models import Artifact, ContentArtifact, ProgressReport, RemoteArtifact
+from pulpcore.plugin.models import Artifact, RemoteSource, ProgressReport
 
 from .api import Stage
 
@@ -189,13 +189,11 @@ class ArtifactDownloader(Stage):
         Returns:
             The number of downloads
         """
-        downloaders_for_content = [
-            d_artifact.download()
-            for d_artifact in d_content.d_artifacts
-            if d_artifact.artifact._state.adding
-            and not d_artifact.deferred_download
-            and not d_artifact.artifact.file
-        ]
+        downloaders_for_content = []
+        for d_artifact in d_content.d_artifacts:
+            if d_artifact.artifact._state.adding and not d_artifact.deferred_download and not d_artifact.artifact.file:
+                downloaders_for_content.append(d_artifact.download())
+
         if downloaders_for_content:
             await asyncio.gather(*downloaders_for_content)
         await self.put(d_content)
@@ -227,126 +225,35 @@ class ArtifactSaver(Stage):
             The coroutine for this stage.
         """
         async for batch in self.batches():
-            da_to_save = []
-            for d_content in batch:
-                for d_artifact in d_content.d_artifacts:
-                    if d_artifact.artifact._state.adding and not d_artifact.deferred_download:
-                        d_artifact.artifact.file = str(d_artifact.artifact.file)
-                        da_to_save.append(d_artifact)
+            with transaction.atomic():
+                da_to_save = []
+                rs_to_save = []
+                for d_content in batch:
+                    for d_artifact in d_content.d_artifacts:
+                        if d_artifact.artifact._state.adding:
+                            if d_artifact.deferred_download:
+                                if d_artifact.remote:
+                                    rs = RemoteSource(
+                                        url=d_artifact.url,
+                                        artifact=d_artifact.artifact,
+                                        remote=d_artifact.remote,
+                                    )
+                                    rs_to_save.append(rs)
+                            else:
+                                d_artifact.artifact.file = str(d_artifact.artifact.file)
 
-            if da_to_save:
-                for d_artifact, artifact in zip(
-                    da_to_save,
-                    Artifact.objects.bulk_get_or_create(
-                        d_artifact.artifact for d_artifact in da_to_save
-                    ),
-                ):
-                    d_artifact.artifact = artifact
+                            da_to_save.append(d_artifact)
 
-            for d_content in batch:
-                await self.put(d_content)
+                if da_to_save:
+                    for d_artifact, artifact in zip(
+                        da_to_save,
+                        Artifact.objects.bulk_get_or_create(
+                            d_artifact.artifact for d_artifact in da_to_save
+                        ),
+                    ):
+                        d_artifact.artifact = artifact
+                if rs_to_save:
+                    RemoteSource.objects.bulk_get_or_create(rs_to_save, ignore_conflicts=True)
 
-
-class RemoteArtifactSaver(Stage):
-    """
-    A Stage that saves :class:`~pulpcore.plugin.models.RemoteArtifact` objects
-
-    An :class:`~pulpcore.plugin.models.RemoteArtifact` object is saved for each
-    :class:`~pulpcore.plugin.stages.DeclarativeArtifact`.
-    """
-
-    async def run(self):
-        """
-        The coroutine for this stage.
-
-        Returns:
-            The coroutine for this stage.
-        """
-        async for batch in self.batches():
-            RemoteArtifact.objects.bulk_get_or_create(self._needed_remote_artifacts(batch))
             for d_content in batch:
                 await self.put(d_content)
-
-    def _needed_remote_artifacts(self, batch):
-        """
-        Build a list of only :class:`~pulpcore.plugin.models.RemoteArtifact` that need
-        to be created for the batch.
-
-        Args:
-            batch (list): List of :class:`~pulpcore.plugin.stages.DeclarativeContent`.
-
-        Returns:
-            List: Of :class:`~pulpcore.plugin.models.RemoteArtifact`.
-        """
-        remotes_present = set()
-        for d_content in batch:
-            # If the attribute is set in a previous batch on the very first item in this batch, the
-            # rest of the items in this batch will not get the attribute set during prefetch.
-            # https://code.djangoproject.com/ticket/32089
-            if hasattr(d_content.content, "_remote_artifact_saver_cas"):
-                delattr(d_content.content, "_remote_artifact_saver_cas")
-
-            for d_artifact in d_content.d_artifacts:
-                if d_artifact.remote:
-                    remotes_present.add(d_artifact.remote)
-
-        prefetch_related_objects(
-            [d_c.content for d_c in batch],
-            Prefetch(
-                "contentartifact_set",
-                queryset=ContentArtifact.objects.prefetch_related(
-                    Prefetch(
-                        "remoteartifact_set",
-                        queryset=RemoteArtifact.objects.filter(remote__in=remotes_present),
-                        to_attr="_remote_artifact_saver_ras",
-                    )
-                ),
-                to_attr="_remote_artifact_saver_cas",
-            ),
-        )
-
-        # Now return the list of RemoteArtifacts that need to be saved.
-        #
-        # We can end up with duplicates (diff pks, same sha256) in the sequence below,
-        # so we store by-sha256 and then return the final values
-        needed_ras = {}  # { str(<sha256>): RemoteArtifact, ... }
-        for d_content in batch:
-            for d_artifact in d_content.d_artifacts:
-                if not d_artifact.remote:
-                    continue
-
-                for content_artifact in d_content.content._remote_artifact_saver_cas:
-                    if d_artifact.relative_path == content_artifact.relative_path:
-                        break
-                else:
-                    msg = _('No declared artifact with relative path "{rp}" for content "{c}"')
-                    raise ValueError(
-                        msg.format(rp=content_artifact.relative_path, c=d_content.content)
-                    )
-
-                for remote_artifact in content_artifact._remote_artifact_saver_ras:
-                    if remote_artifact.remote_id == d_artifact.remote.pk:
-                        break
-                else:
-                    remote_artifact = self._create_remote_artifact(d_artifact, content_artifact)
-                    key = f"{str(content_artifact.pk)}-{str(d_artifact.remote.pk)}"
-                    needed_ras[key] = remote_artifact
-
-        return list(needed_ras.values())
-
-    @staticmethod
-    def _create_remote_artifact(d_artifact, content_artifact):
-        ra = RemoteArtifact(
-            url=d_artifact.url,
-            size=d_artifact.artifact.size,
-            md5=d_artifact.artifact.md5,
-            sha1=d_artifact.artifact.sha1,
-            sha224=d_artifact.artifact.sha224,
-            sha256=d_artifact.artifact.sha256,
-            sha384=d_artifact.artifact.sha384,
-            sha512=d_artifact.artifact.sha512,
-            content_artifact=content_artifact,
-            remote=d_artifact.remote,
-        )
-        ra.validate_checksums()
-        return ra

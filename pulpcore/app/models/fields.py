@@ -42,28 +42,31 @@ class ArtifactFileField(FileField):
 
         """
         file = model_instance.file
-        artifact_storage_path = self.upload_to(model_instance, "")
+        if file:
+            artifact_storage_path = self.upload_to(model_instance, "")
 
-        already_in_place = file.name in [
-            artifact_storage_path,
-            os.path.join(settings.MEDIA_ROOT, artifact_storage_path),
-        ]
-        is_in_artifact_storage = file.name.startswith(os.path.join(settings.MEDIA_ROOT, "artifact"))
-
-        if not already_in_place and is_in_artifact_storage:
-            raise ValueError(
-                _(
-                    "The file referenced by the Artifact is already present in "
-                    "Artifact storage. Files must be stored outside this location "
-                    "prior to Artifact creation."
-                )
+            already_in_place = file.name in [
+                artifact_storage_path,
+                os.path.join(settings.MEDIA_ROOT, artifact_storage_path),
+            ]
+            is_in_artifact_storage = file.name.startswith(
+                os.path.join(settings.MEDIA_ROOT, "artifact")
             )
 
-        move = file._committed and file.name != artifact_storage_path
-        if move:
-            if not already_in_place:
-                file._file = TemporaryDownloadedFile(open(file.name, "rb"))
-            file._committed = False
+            if not already_in_place and is_in_artifact_storage:
+                raise ValueError(
+                    _(
+                        "The file referenced by the Artifact is already present in "
+                        "Artifact storage. Files must be stored outside this location "
+                        "prior to Artifact creation."
+                    )
+                )
+
+            move = file._committed and file.name != artifact_storage_path
+            if move:
+                if not already_in_place:
+                    file._file = TemporaryDownloadedFile(open(file.name, "rb"))
+                file._committed = False
 
         return super().pre_save(model_instance, add)
 

@@ -25,7 +25,7 @@ class SingleContentArtifactField(RelatedField):
 
     lookup_field = "pk"
     view_name = "artifacts-detail"
-    queryset = models.Artifact.objects.all()
+    queryset = models.Artifact.objects.is_immediate()
     allow_null = True
 
     def get_attribute(self, instance):
@@ -130,7 +130,7 @@ class ContentArtifactsField(serializers.DictField):
             relative_path_validator(relative_path)
             artifactfield = RelatedField(
                 view_name="artifacts-detail",
-                queryset=models.Artifact.objects.all(),
+                queryset=models.Artifact.objects.is_immediate(),
                 source="*",
                 initial=url,
             )

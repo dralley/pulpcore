@@ -323,7 +323,9 @@ if not (len(sys.argv) >= 2 and sys.argv[1] in ["handle-artifact-checksums", "mig
         with connection.cursor() as cursor:
             for checksum in ALLOWED_CONTENT_CHECKSUMS:
                 # can't import Artifact here so use a direct db connection
-                cursor.execute(f"SELECT count(pulp_id) FROM core_artifact WHERE {checksum} IS NULL")
+                cursor.execute(
+                    f"SELECT count(pulp_id) FROM core_artifact WHERE {checksum} IS NULL AND COALESCE (file, '') <> ''"
+                )
                 row = cursor.fetchone()
                 if row[0] > 0:
                     raise ImproperlyConfigured(

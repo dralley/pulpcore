@@ -11,7 +11,6 @@ from pulpcore.plugin.models import (
     Artifact,
     Content,
     ContentArtifact,
-    RemoteArtifact,
     RepositoryVersion,
 )
 
@@ -59,9 +58,7 @@ class Command(BaseCommand):
         for checksum in checksums:
             query |= Q(**{f"{checksum}__isnull": False})
 
-        remote_artifacts = RemoteArtifact.objects.filter(query).filter(
-            content_artifact__artifact__isnull=True
-        )
+        remote_artifacts = Artifact.objects.is_ondemand().filter(query)
         ras_size = remote_artifacts.aggregate(Sum("size"))["size__sum"]
 
         content_artifacts = ContentArtifact.objects.filter(remoteartifact__pk__in=remote_artifacts)
@@ -96,7 +93,7 @@ class Command(BaseCommand):
         for allowed_checksum in allowed_checksums:
             query_required |= Q(**{f"{allowed_checksum}__isnull": True})
 
-        artifacts = Artifact.objects.filter(query_forbidden | query_required)
+        artifacts = Artifact.objects.is_immediate().filter(query_forbidden | query_required)
         content_artifacts = ContentArtifact.objects.filter(artifact__in=artifacts)
         content = Content.objects.filter(contentartifact__pk__in=content_artifacts)
         repo_versions = RepositoryVersion.versions_containing_content(content).select_related(

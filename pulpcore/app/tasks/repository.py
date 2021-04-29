@@ -58,27 +58,29 @@ def delete_version(pk):
         version.delete()
 
 
-async def _repair_ca(content_artifact, repaired=None):
-    remote_artifacts = content_artifact.remoteartifact_set.all()
+async def _repair_artifact(artifact, repaired=None):
+    remote_sources = artifact.remote_sources.all()
 
-    if not remote_artifacts:
-        log.warn(
-            _("Artifact {} is unrepairable - no remote source".format(content_artifact.artifact))
-        )
+    if not remote_sources:
+        log.warn(_("Artifact {} is unrepairable - no remote source".format(artifact)))
         return False
 
-    for remote_artifact in remote_artifacts:
-        downloader = remote_artifact.remote.cast().get_downloader(remote_artifact)
+    for source in remote_sources:
+        downloader = source.remote.cast().get_downloader(
+            url=source.url,
+            expected_size=artifact.expected_size(),
+            expected_digests=artifact.expected_digests(),
+        )
         dl_result = await downloader.run()
-        if dl_result.artifact_attributes["sha256"] == content_artifact.artifact.sha256:
+        if dl_result.artifact_attributes["sha256"] == artifact.sha256:
             with open(dl_result.path, "rb") as src:
-                filename = content_artifact.artifact.file.name
-                content_artifact.artifact.file.delete(save=False)
-                content_artifact.artifact.file.save(filename, src, save=False)
+                filename = artifact.file.name
+                artifact.file.delete(save=False)
+                artifact.file.save(filename, src, save=False)
             if repaired is not None:
                 repaired.increment()
             return True
-        log.warn(_("Redownload failed from {}.").format(remote_artifact.url))
+        log.warn(_("Redownload failed from {}.").format(source.url))
 
     return False
 
@@ -99,10 +101,12 @@ async def _repair_artifacts_for_content(subset=None, verify_checksums=True):
     loop = asyncio.get_event_loop()
     pending = set()
 
-    query_set = models.ContentArtifact.objects.exclude(artifact__isnull=True)
+    query_set = models.Artifact.objects.is_immediate()
 
     if subset:
-        query_set = query_set.filter(content__in=subset)
+        # TODO: verify & maybe optimize
+        content_artifacts = models.ContentArtifact.objects.filter(content__in=subset)
+        query_set = query_set.filter(pk__in=content_artifacts.values_list("pk", flat=True))
 
     with ProgressReport(
         message="Identify missing units", code="repair.missing"
@@ -113,9 +117,7 @@ async def _repair_artifacts_for_content(subset=None, verify_checksums=True):
     ) as repaired:
 
         with ThreadPoolExecutor(max_workers=2) as checksum_executor:
-            for content_artifact in query_set.select_related("artifact").iterator():
-                artifact = content_artifact.artifact
-
+            for artifact in query_set.iterator():
                 valid = await loop.run_in_executor(None, default_storage.exists, artifact.file.name)
                 if not valid:
                     missing.increment()
@@ -140,7 +142,7 @@ async def _repair_artifacts_for_content(subset=None, verify_checksums=True):
                             pending, return_when=asyncio.FIRST_COMPLETED
                         )
                         await asyncio.gather(*done)  # Clean up tasks
-                    pending.add(asyncio.ensure_future(_repair_ca(content_artifact, repaired)))
+                    pending.add(asyncio.ensure_future(_repair_artifact(artifact, repaired)))
         await asyncio.gather(*pending)
 
 

@@ -6,7 +6,6 @@ from .artifact_stages import (
     ArtifactDownloader,
     ArtifactSaver,
     QueryExistingArtifacts,
-    RemoteArtifactSaver,
 )
 from .association_stages import ContentAssociation, ContentUnassociation
 from .content_stages import ContentSaver, QueryExistingContents, ResolveContentFutures
@@ -126,7 +125,6 @@ class DeclarativeVersion:
             ArtifactSaver(),
             QueryExistingContents(),
             ContentSaver(),
-            RemoteArtifactSaver(),
             ResolveContentFutures(),
         ]
         return pipeline

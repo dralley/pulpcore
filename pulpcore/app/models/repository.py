@@ -343,57 +343,41 @@ class Remote(MasterModel):
                 self._download_throttler = Throttler(rate_limit=self.rate_limit)
                 return self._download_throttler
 
-    def get_downloader(self, remote_artifact=None, url=None, **kwargs):
+    def get_downloader(self, url, expected_size=None, expected_digests=None, **kwargs):
         """
-        Get a downloader from either a RemoteArtifact or URL that is configured with this Remote.
-
-        This method accepts either `remote_artifact` or `url` but not both. At least one is
-        required. If neither or both are passed a ValueError is raised.
+        Get a downloader for a URL.
 
         Plugin writers are expected to override when additional configuration is needed or when
         another class of download is required.
 
         Args:
-            remote_artifact (:class:`~pulpcore.app.models.RemoteArtifact`): The RemoteArtifact to
-                download.
             url (str): The URL to download.
+            expected_size (int): The expected size of the downloaded file.
+            expected_digests (dict): The expected digest values of the downloaded file.
             kwargs (dict): This accepts the parameters of
                 :class:`~pulpcore.plugin.download.BaseDownloader`.
-
-        Raises:
-            ValueError: If neither remote_artifact and url are passed, or if both are passed.
 
         Returns:
             subclass of :class:`~pulpcore.plugin.download.BaseDownloader`: A downloader that
             is configured with the remote settings.
         """
-        if remote_artifact and url:
-            raise ValueError(_("get_downloader() cannot accept both 'remote_artifact' and 'url'."))
-        if remote_artifact is None and url is None:
-            raise ValueError(_("get_downloader() requires either 'remote_artifact' and 'url'."))
-        if remote_artifact:
-            url = remote_artifact.url
-            expected_digests = {}
-            for digest_name in ALL_KNOWN_CONTENT_CHECKSUMS:
-                digest_value = getattr(remote_artifact, digest_name)
-                if digest_value:
-                    expected_digests[digest_name] = digest_value
-            if expected_digests:
-                kwargs["expected_digests"] = expected_digests
-            if remote_artifact.size:
-                kwargs["expected_size"] = remote_artifact.size
-        return self.download_factory.build(url, **kwargs)
+        return self.download_factory.build(
+            url,
+            expected_size=expected_size,
+            expected_digests=expected_digests,
+            **kwargs
+        )
 
-    def get_remote_artifact_url(self, relative_path=None):
+    def get_remote_source_url(self, relative_path):
         """
-        Get the full URL for a RemoteArtifact from a relative path.
+        Get the full URL for a RemoteSource from a relative path.
 
         This method returns the URL for a RemoteArtifact by concatinating the Remote's url and the
         relative path.located in the Remote. Plugin writers are expected to override this method
         when a more complex algorithm is needed to determine the full URL.
 
         Args:
-            relative_path (str): The relative path of a RemoteArtifact
+            relative_path (str): The relative path of a RemoteSource
 
         Raises:
             ValueError: If relative_path starts with a '/'.
@@ -405,14 +389,14 @@ class Remote(MasterModel):
             raise ValueError(_("Relative path can't start with '/'. {0}").format(relative_path))
         return path.join(self.url, relative_path)
 
-    def get_remote_artifact_content_type(self, relative_path=None):
+    def get_remote_source_content_type(self, relative_path):
         """
         Get the type of content that should be available at the relative path.
 
         Plugin writers are expected to implement this method.
 
         Args:
-            relative_path (str): The relative path of a RemoteArtifact
+            relative_path (str): The relative path of a RemoteSource
 
         Returns:
             Class: The Class of the content type that should be available at the relative path.

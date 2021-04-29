@@ -3,7 +3,6 @@ from gettext import gettext as _
 import asyncio
 
 from pulpcore.constants import ALL_KNOWN_CONTENT_CHECKSUMS
-from pulpcore.plugin.models import Artifact
 
 
 class DeclarativeArtifact:
@@ -87,7 +86,9 @@ class DeclarativeArtifact:
         downloader = self.remote.get_downloader(url=self.url, **validation_kwargs)
         # Custom downloaders may need extra information to complete the request.
         download_result = await downloader.run(extra_data=self.extra_data)
-        self.artifact = Artifact(**download_result.artifact_attributes, file=download_result.path)
+        # downloader should have already validated everything, so we don't need to do it twice
+        # TODO: verify that ^^
+        self.artifact.set_file(file=download_result.path)
         return download_result
 
 

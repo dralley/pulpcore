@@ -57,7 +57,7 @@ class BulkCreateManager(models.Manager):
     A manager that provides a bulk_get_or_create()
     """
 
-    def bulk_get_or_create(self, objs, batch_size=None):
+    def bulk_get_or_create(self, objs, batch_size=None, ignore_conflicts=False):
         """
         Insert the list of objects into the database and get existing objects from the database.
 
@@ -72,6 +72,7 @@ class BulkCreateManager(models.Manager):
         Args:
             objs (iterable of models.Model): an iterable of Django Model instances
             batch_size (int): how many are created in a single query
+            ignore_conflicts (bool): whether to ignore conflicts
 
         Returns:
             List of instances that were inserted into the database.
@@ -79,7 +80,9 @@ class BulkCreateManager(models.Manager):
         objs = list(objs)
         try:
             with transaction.atomic():
-                return super().bulk_create(objs, batch_size=batch_size)
+                return super().bulk_create(
+                    objs, batch_size=batch_size, ignore_conflicts=ignore_conflicts
+                )
         except IntegrityError:
             for i in range(len(objs)):
                 try:
@@ -139,6 +142,30 @@ class HandleTempFilesMixin:
         self.file.delete(save=False)
 
 
+class ArtifactManager(BulkCreateManager):
+    """
+    A manager for Artifact objects.
+    """
+
+    def is_ondemand(self):
+        """
+        Returns a queryset of Artifacts which are not present on-disk, but in some remote location.
+
+        Returns:
+            :class:`django.db.models.query.QuerySet`:  A query set of Artifact objects
+        """
+        return self.filter(file__isnull=True)
+
+    def is_immediate(self):
+        """
+        Returns a queryset of Artifacts which are present on-disk.
+
+        Returns:
+            :class:`django.db.models.query.QuerySet`:  A query set of Artifact objects.
+        """
+        return self.filter(file__isnull=False)
+
+
 class Artifact(HandleTempFilesMixin, BaseModel):
     """
     A file associated with a piece of content.
@@ -172,16 +199,16 @@ class Artifact(HandleTempFilesMixin, BaseModel):
         """
         return storage.get_artifact_path(self.sha256)
 
-    file = fields.ArtifactFileField(null=False, upload_to=storage_path, max_length=255)
-    size = models.BigIntegerField(null=False)
+    file = fields.ArtifactFileField(null=True, upload_to=storage_path, max_length=255)
+    size = models.BigIntegerField(null=True)
     md5 = models.CharField(max_length=32, null=True, unique=False, db_index=True)
     sha1 = models.CharField(max_length=40, null=True, unique=False, db_index=True)
     sha224 = models.CharField(max_length=56, null=True, unique=False, db_index=True)
-    sha256 = models.CharField(max_length=64, null=False, unique=True, db_index=True)
+    sha256 = models.CharField(max_length=64, null=True, unique=True, db_index=True)
     sha384 = models.CharField(max_length=96, null=True, unique=True, db_index=True)
     sha512 = models.CharField(max_length=128, null=True, unique=True, db_index=True)
 
-    objects = BulkCreateManager()
+    objects = ArtifactManager()
 
     # All available digest fields ordered by algorithm strength.
     DIGEST_FIELDS = _DIGEST_FIELDS
@@ -195,6 +222,65 @@ class Artifact(HandleTempFilesMixin, BaseModel):
 
     # Digest-fields that are NOT ALLOWED
     FORBIDDEN_DIGESTS = _FORBIDDEN_DIGESTS
+
+    class Meta:
+        constraints = (
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        # downloaded files must at least have a size, and a sha256 checksum
+                        ~models.Q(file__exact="") & models.Q(size__isnull=False, sha256__isnull=False)
+                    ) | models.Q(
+                        # undownloaded files must have remote sources
+                        # (Django Lifecycle hook validates checksums)
+                        file__exact="",
+                    )
+                ),
+                name="non_downloaded_artifact_remote_sources",
+            ),
+        )
+
+    @property
+    def is_downloaded(self):
+        return self.file != ''
+
+    def expected_size(self):
+        """Return the expected size value for the given remote 'artifact'"""
+        return self.size
+
+    def expected_digests(self):
+        """Return the expected digest values for the given remote 'artifact'"""
+        expected_digests = {}
+        for digest_name in ALL_KNOWN_CONTENT_CHECKSUMS:
+            digest_value = getattr(self, digest_name)
+            if digest_value:
+                expected_digests[digest_name] = digest_value
+        return expected_digests
+
+    def validate_checksums(self):
+        """Validate if RemoteArtifact has allowed checksum or no checksum at all."""
+        if not any(
+            [
+                checksum_type
+                for checksum_type in ALL_KNOWN_CONTENT_CHECKSUMS
+                if getattr(self, checksum_type, False)
+            ]
+        ):
+            return
+        if not any(
+            [
+                checksum_type
+                for checksum_type in Artifact.DIGEST_FIELDS
+                if getattr(self, checksum_type, False)
+            ]
+        ):
+            raise UnsupportedDigestValidationError(
+                _(
+                    "On-demand content located at the url {} contains forbidden checksum type,"
+                    "thus cannot be synced."
+                    "You can allow checksum type with 'ALLOWED_CONTENT_CHECKSUMS' setting."
+                ).format(self.url)
+            )
 
     @hook(BEFORE_SAVE)
     def before_save(self):
@@ -219,11 +305,12 @@ class Artifact(HandleTempFilesMixin, BaseModel):
                 _("Checksum algorithms {} are forbidden for this Pulp instance.").format(bad_keys)
             )
 
-        missing_keys = [k for k in self.DIGEST_FIELDS if not getattr(self, k)]
-        if missing_keys:
-            raise MissingDigestValidationError(
-                _("Missing required checksum algorithms {}.").format(missing_keys)
-            )
+        if self.is_downloaded:
+            missing_keys = [k for k in self.DIGEST_FIELDS if not getattr(self, k)]
+            if missing_keys:
+                raise MissingDigestValidationError(
+                    _("Missing required checksum algorithms {}.").format(missing_keys)
+                )
 
     def q(self):
         if not self._state.adding:
@@ -252,10 +339,8 @@ class Artifact(HandleTempFilesMixin, BaseModel):
                 return True
         return False
 
-    @staticmethod
-    def init_and_validate(file, expected_digests=None, expected_size=None):
-        """
-        Initialize an in-memory Artifact from a file, and validate digest and size info.
+    def set_file(self, file, expected_digests=None, expected_size=None):
+        """Initialize an in-memory Artifact from a file, and validate digest and size info.
 
         This accepts both a path to a file on-disk or a
         :class:`~pulpcore.app.files.PulpTemporaryUploadedFile`.
@@ -308,11 +393,41 @@ class Artifact(HandleTempFilesMixin, BaseModel):
                 if expected_digest != hashers[algorithm].hexdigest():
                     raise DigestValidationError()
 
-        attributes = {"size": size, "file": file}
-        for algorithm in Artifact.DIGEST_FIELDS:
-            attributes[algorithm] = hashers[algorithm].hexdigest()
+        self.size = size
+        self.file = file
 
-        return Artifact(**attributes)
+        for algorithm in Artifact.DIGEST_FIELDS:
+            setattr(self, algorithm, hashers[algorithm].hexdigest())
+
+    @staticmethod
+    def init_and_validate(file, expected_digests=None, expected_size=None):
+        """
+        Create a new in-memory Artifact from a file, and validate digest and size info.
+
+        This accepts both a path to a file on-disk or a
+        :class:`~pulpcore.app.files.PulpTemporaryUploadedFile`.
+
+        Args:
+            file (:class:`~pulpcore.app.files.PulpTemporaryUploadedFile` or str): The
+                PulpTemporaryUploadedFile to create the Artifact from or a string with the full path
+                to the file on disk.
+            expected_digests (dict): Keyed on the algorithm name provided by hashlib and stores the
+                value of the expected digest. e.g. {'md5': '912ec803b2ce49e4a541068d495ab570'}
+            expected_size (int): The number of bytes the download is expected to have.
+
+        Raises:
+            :class:`~pulpcore.exceptions.DigestValidationError`: When any of the ``expected_digest``
+                values don't match the digest of the data
+            :class:`~pulpcore.exceptions.SizeValidationError`: When the ``expected_size`` value
+                doesn't match the size of the data
+            :class:`~pulpcore.exceptions.UnsupportedDigestValidationError`: When any of the
+                ``expected_digest`` algorithms aren't in the ALLOWED_CONTENT_CHECKSUMS list
+        Returns:
+            An in-memory, unsaved :class:`~pulpcore.plugin.models.Artifact`
+        """
+        artifact = Artifact()
+        artifact.set_file(file, expected_digests, expected_size)
+        return artifact
 
     @classmethod
     def from_pulp_temporary_file(cls, temp_file):
@@ -330,6 +445,36 @@ class Artifact(HandleTempFilesMixin, BaseModel):
             artifact.save()
         temp_file.delete()
         return artifact
+
+
+class RemoteSource(BaseModel):
+    """
+    Represents a content artifact that is provided by a remote (external) repository.
+
+    Remotes that want to support deferred download policies should use this model to store
+    information required for downloading an Artifact at some point in the future. At a minimum this
+    includes the URL, the Artifact, and the Remote that created it.
+
+    Fields:
+
+        url (models.TextField): The URL where the artifact can be retrieved.
+
+    Relations:
+
+        artifact (:class:`pulpcore.app.models.ForeignKey`):
+            Artifact associated with this RemoteSource.
+        remote (:class:`django.db.models.ForeignKey`):
+            Remote that created the RemoteSource.
+    """
+
+    url = models.TextField(validators=[validators.URLValidator])
+    remote = models.ForeignKey("Remote", on_delete=models.CASCADE)
+    artifact = models.ForeignKey(Artifact, on_delete=models.CASCADE, related_name="remote_sources")
+
+    objects = BulkCreateManager()
+
+    class Meta:
+        unique_together = ("remote", "artifact")
 
 
 class PulpTemporaryFile(HandleTempFilesMixin, BaseModel):
@@ -505,7 +650,7 @@ class ContentArtifact(BaseModel, QueryMixin):
     """
 
     artifact = models.ForeignKey(
-        Artifact, on_delete=models.PROTECT, null=True, related_name="content_memberships"
+        Artifact, on_delete=models.PROTECT, related_name="content_memberships"
     )
     content = models.ForeignKey(Content, on_delete=models.CASCADE)
     relative_path = models.TextField()
@@ -514,77 +659,6 @@ class ContentArtifact(BaseModel, QueryMixin):
 
     class Meta:
         unique_together = ("content", "relative_path")
-
-
-class RemoteArtifact(BaseModel, QueryMixin):
-    """
-    Represents a content artifact that is provided by a remote (external) repository.
-
-    Remotes that want to support deferred download policies should use this model to store
-    information required for downloading an Artifact at some point in the future. At a minimum this
-    includes the URL, the ContentArtifact, and the Remote that created it. It can also store
-    expected size and any expected checksums.
-
-    Fields:
-
-        url (models.TextField): The URL where the artifact can be retrieved.
-        size (models.BigIntegerField): The expected size of the file in bytes.
-        md5 (models.CharField): The expected MD5 checksum of the file.
-        sha1 (models.CharField): The expected SHA-1 checksum of the file.
-        sha224 (models.CharField): The expected SHA-224 checksum of the file.
-        sha256 (models.CharField): The expected SHA-256 checksum of the file.
-        sha384 (models.CharField): The expected SHA-384 checksum of the file.
-        sha512 (models.CharField): The expected SHA-512 checksum of the file.
-
-    Relations:
-
-        content_artifact (:class:`pulpcore.app.models.ForeignKey`):
-            ContentArtifact associated with this RemoteArtifact.
-        remote (:class:`django.db.models.ForeignKey`): Remote that created the
-            RemoteArtifact.
-    """
-
-    url = models.TextField(validators=[validators.URLValidator])
-    size = models.BigIntegerField(null=True)
-    md5 = models.CharField(max_length=32, null=True)
-    sha1 = models.CharField(max_length=40, null=True)
-    sha224 = models.CharField(max_length=56, null=True)
-    sha256 = models.CharField(max_length=64, null=True)
-    sha384 = models.CharField(max_length=96, null=True)
-    sha512 = models.CharField(max_length=128, null=True)
-
-    content_artifact = models.ForeignKey(ContentArtifact, on_delete=models.CASCADE)
-    remote = models.ForeignKey("Remote", on_delete=models.CASCADE)
-
-    objects = BulkCreateManager()
-
-    def validate_checksums(self):
-        """Validate if RemoteArtifact has allowed checksum or no checksum at all."""
-        if not any(
-            [
-                checksum_type
-                for checksum_type in ALL_KNOWN_CONTENT_CHECKSUMS
-                if getattr(self, checksum_type, False)
-            ]
-        ):
-            return
-        if not any(
-            [
-                checksum_type
-                for checksum_type in Artifact.DIGEST_FIELDS
-                if getattr(self, checksum_type, False)
-            ]
-        ):
-            raise UnsupportedDigestValidationError(
-                _(
-                    "On-demand content located at the url {} contains forbidden checksum type,"
-                    "thus cannot be synced."
-                    "You can allow checksum type with 'ALLOWED_CONTENT_CHECKSUMS' setting."
-                ).format(self.url)
-            )
-
-    class Meta:
-        unique_together = ("content_artifact", "remote")
 
 
 class SigningService(BaseModel):

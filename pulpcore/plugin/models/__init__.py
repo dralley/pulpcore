@@ -30,7 +30,7 @@ from pulpcore.app.models import (  # noqa
     PulpTemporaryFile,
     Repository,
     Remote,
-    RemoteArtifact,
+    RemoteSource,
     RepositoryContent,
     RepositoryVersion,
     RepositoryVersionDistribution,
