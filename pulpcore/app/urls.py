@@ -10,6 +10,8 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 from rest_framework_nested import routers
+import django_prometheus
+import rest_framework
 
 from pulpcore.app.apps import pulp_plugin_configs
 from pulpcore.app.views import OrphansView, PulpImporterImportCheckView, RepairView, StatusView
@@ -142,6 +144,7 @@ urlpatterns = [
     ),
     path("auth/", include("rest_framework.urls")),
     path(settings.ADMIN_SITE_URL, admin.site.urls),
+    path(API_ROOT, include('django_prometheus.urls'))
 ]
 
 urlpatterns.append(

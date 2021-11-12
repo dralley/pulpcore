@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     # third-party
     "django_filters",
     "django_guid",
+    "django_prometheus",
     "drf_spectacular",
     "guardian",
     "rest_framework",
@@ -103,6 +104,7 @@ for app in OPTIONAL_APPS:
         INSTALLED_APPS.append(app)
 
 MIDDLEWARE = [
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "django_guid.middleware.guid_middleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -113,6 +115,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_currentuser.middleware.ThreadLocalUserMiddleware",
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
 
 AUTHENTICATION_BACKENDS = [
@@ -183,7 +186,6 @@ USE_I18N = "USE_I18N", True
 USE_L10N = True
 
 USE_TZ = True
-
 
 # A set of default settings to use if the configuration file in
 # /etc/pulp/ is missing or if it does not have values for every setting
