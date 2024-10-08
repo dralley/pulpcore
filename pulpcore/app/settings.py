@@ -325,7 +325,9 @@ ALLOWED_CONTENT_CHECKSUMS = ["sha224", "sha256", "sha384", "sha512"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
-TASK_DIAGNOSTICS = False
+TASK_DIAGNOSTICS = True
+
+ENABLE_V4_API = True
 
 ANALYTICS = True
 
@@ -558,3 +560,9 @@ settings.set("V3_API_ROOT", api_root + "api/v3/")  # Not user configurable
 settings.set("V3_DOMAIN_API_ROOT", api_root + "<slug:pulp_domain>/api/v3/")
 settings.set("V3_API_ROOT_NO_FRONT_SLASH", settings.V3_API_ROOT.lstrip("/"))
 settings.set("V3_DOMAIN_API_ROOT_NO_FRONT_SLASH", settings.V3_DOMAIN_API_ROOT.lstrip("/"))
+
+settings.set("V4_API_ROOT", api_root + "api/v4/")  # Not user configurable
+# todo: consolidate since use of domains will be assumed going forwards
+settings.set("V4_DOMAIN_API_ROOT", api_root + "<slug:pulp_domain>/api/v4/")
+settings.set("V4_API_ROOT_NO_FRONT_SLASH", settings.V4_API_ROOT.lstrip("/"))
+settings.set("V4_DOMAIN_API_ROOT_NO_FRONT_SLASH", settings.V4_DOMAIN_API_ROOT.lstrip("/"))
