@@ -174,44 +174,54 @@ special_views = [
     ),
 ]
 
-docs_and_status = [
-    path("livez/", LivezView.as_view()),
-    path("status/", StatusView.as_view()),
-    path(
-        "docs/api.json",
-        SpectacularJSONAPIView.as_view(authentication_classes=[], permission_classes=[]),
-        name="schema",
-    ),
-    path(
-        "docs/api.yaml",
-        SpectacularYAMLAPIView.as_view(authentication_classes=[], permission_classes=[]),
-        name="schema-yaml",
-    ),
-    path(
-        "docs/",
-        SpectacularRedocView.as_view(
-            authentication_classes=[],
-            permission_classes=[],
-            url=f"{V3_API_ROOT}docs/api.json?include_html=1&pk_path=1",
+def _docs_and_status(_api_root):
+    return [
+        path("livez/", LivezView.as_view()),
+        path("status/", StatusView.as_view()),
+        path(
+            "docs/api.json",
+            SpectacularJSONAPIView.as_view(authentication_classes=[], permission_classes=[]),
+            name="schema",
         ),
-        name="schema-redoc",
-    ),
-    path(
-        "swagger/",
-        SpectacularSwaggerView.as_view(
-            authentication_classes=[],
-            permission_classes=[],
-            url=f"{V3_API_ROOT}docs/api.json?include_html=1&pk_path=1",
+        path(
+            "docs/api.yaml",
+            SpectacularYAMLAPIView.as_view(authentication_classes=[], permission_classes=[]),
+            name="schema-yaml",
         ),
-        name="schema-swagger",
-    ),
-]
+        path(
+            "docs/",
+            SpectacularRedocView.as_view(
+                authentication_classes=[],
+                permission_classes=[],
+                url=f"{_api_root}docs/api.json?include_html=1&pk_path=1",
+            ),
+            name="schema-redoc",
+        ),
+        path(
+            "swagger/",
+            SpectacularSwaggerView.as_view(
+                authentication_classes=[],
+                permission_classes=[],
+                url=f"{_api_root}docs/api.json?include_html=1&pk_path=1",
+            ),
+            name="schema-swagger",
+        ),
+    ]
+
+docs_and_status = _docs_and_status(V3_API_ROOT)
+docs_and_status_v4 = _docs_and_status(settings.V4_API_ROOT)  # todo: root rewrite stuff?
 
 urlpatterns = [
     path(API_ROOT, include(special_views)),
     path("auth/", include("rest_framework.urls")),
     path(settings.V3_API_ROOT_NO_FRONT_SLASH, include(docs_and_status)),
 ]
+
+if settings.ENABLE_V4_API:
+    urlpatterns.extend([
+        path(settings.V4_API_ROOT, include(special_views)),
+        path(settings.V4_API_ROOT_NO_FRONT_SLASH, include(docs_and_status_v4)),
+    ])
 
 if settings.DOMAIN_ENABLED:
     # Ensure Docs and Status endpoints are available within domains, but are not shown in API schema
@@ -238,6 +248,10 @@ root_router = PulpDefaultRouter()
 all_routers = [root_router] + vs_tree.register_with(root_router)
 for router in all_routers:
     urlpatterns.append(path(API_ROOT, include(router.urls)))
+
+if settings.ENABLE_V4_API:
+    for router in all_routers:
+        urlpatterns.append(path(settings.V4_API_ROOT, include(router.urls)))   # todo: root rewrite stuff?
 
 # If plugins define a urls.py, include them into the root namespace.
 for plugin_pattern in plugin_patterns:

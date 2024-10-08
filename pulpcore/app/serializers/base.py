@@ -456,6 +456,13 @@ class ModelSerializer(
         read_only=True,
     )
 
+    def to_representation(self, instance):
+        """Overridden to drop the pulp_href field from responses"""
+        representation = super().to_representation(instance)
+        if self.context.get("api_ver") == "4":
+            representation.pop('pulp_href')
+        return representation
+
     def _validate_relative_path(self, path):
         """
         Validate a relative path (eg from a url) to ensure it forms a valid url and does not begin

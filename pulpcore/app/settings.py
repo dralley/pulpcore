@@ -394,6 +394,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 # NOTE: "memray" and "pyinstrument" require additional packages to be installed on the system.
 TASK_DIAGNOSTICS = []  # ["memory", "pyinstrument", "memray"]
 
+ENABLE_V4_API = False
+
 ANALYTICS = True
 
 HIDE_GUARDED_DISTRIBUTIONS = False
@@ -652,3 +654,9 @@ settings.set("V3_API_ROOT", api_root + "api/v3/")  # Not user configurable
 settings.set("V3_DOMAIN_API_ROOT", api_root + "<slug:pulp_domain>/api/v3/")
 settings.set("V3_API_ROOT_NO_FRONT_SLASH", settings.V3_API_ROOT.lstrip("/"))
 settings.set("V3_DOMAIN_API_ROOT_NO_FRONT_SLASH", settings.V3_DOMAIN_API_ROOT.lstrip("/"))
+
+settings.set("V4_API_ROOT", api_root + "api/v4/")  # Not user configurable
+# todo: consolidate since use of domains will be assumed going forwards
+settings.set("V4_DOMAIN_API_ROOT", api_root + "<slug:pulp_domain>/api/v4/")
+settings.set("V4_API_ROOT_NO_FRONT_SLASH", settings.V4_API_ROOT.lstrip("/"))
+settings.set("V4_DOMAIN_API_ROOT_NO_FRONT_SLASH", settings.V4_DOMAIN_API_ROOT.lstrip("/"))
